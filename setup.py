@@ -11,7 +11,7 @@ setuptools.setup(
   description=discription,
   long_description=discription,
   long_description_content_type="text/markdown",
-  url="",
+  url="https://github.com/zlolss/zlutils.py.git",
   py_modules=['zlutils'],
   install_requires=[
     ],
