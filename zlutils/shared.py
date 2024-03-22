@@ -1,3 +1,7 @@
+'''
+v0.1 2024-03-22
+'''
+
 import logging, time
 日志 = logging.getLogger()
 
@@ -118,6 +122,7 @@ class 鸡心管理器:
     def 跳一下(我):
         我.只因.心 = time.time()
 
+    @property
     def 有心跳(我):
         return (time.time()-我.只因.心) <= 我.心跳检测间隔
 
