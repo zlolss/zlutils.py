@@ -1,2 +1,2 @@
  
-import .shared
+from . import shared
