@@ -1,5 +1,6 @@
 '''
 v0.1 2024-03-22
+# 共享列表在linux,py310环境下有bug,当创建者断开时丢失
 '''
 
 import logging, time
@@ -43,7 +44,8 @@ class _只因(type):
         try:
             共享列表 = shared_memory.ShareableList( name=共享列表名 )
             日志.info("载入共享列表, 覆盖默认值")
-        except:
+        except Exception as e:
+            日志.warning(e)
             值列表 = [ 类变量[变量名] for 变量名 in 变量名列表 ]
             值列表_元类 = [类变量_元类[变量名] for 变量名 in 变量名列表_元类]
             值列表_合成 = 值列表+值列表_元类
