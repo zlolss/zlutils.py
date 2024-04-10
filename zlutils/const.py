@@ -23,7 +23,7 @@ class _常量类(type):
 class 常量类(metaclass=_常量类):
 
     def __init__(我):
-        raise TypeError(f'{我.__name__}不允许实例化')
+        raise TypeError(f'{我.__class__.__name__}不允许实例化')
 
 
 # =============================================== 模式类
@@ -66,6 +66,10 @@ class 模式类(metaclass=_模式类):
     样例 = 0 # 等于号后的值不生效,可任意设置
 
     def __init__(我):
-        raise TypeError(f'{我.__name__}不允许实例化')
+        raise TypeError(f'{我.__class__.__name__}不允许实例化')
 
+
+# =============================================== 字段类
+class 字段类:
+    pass
 
