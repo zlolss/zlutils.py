@@ -1,2 +1,2 @@
  
-from . import shared, wrapper, const, event
+from . import shared, wrapper, const, event, view
