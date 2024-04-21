@@ -21,6 +21,9 @@ class 事件类(metaclass=_模式类):
         for 监听器 in 所有该事件的监听器:
             监听器(参数)
 
+    def add_listener(self, event, callback):
+        return self.添加监听器(event, callback)
+
     def 添加监听器(我, 事件, 监听器):
         if 事件 in 我.所有监听器:
             我.所有监听器[事件][监听器] = None
@@ -29,6 +32,9 @@ class 事件类(metaclass=_模式类):
 
     def 设置唯一监听器(我, 事件, 监听器):
         我.所有监听器[事件] = [监听器]
+
+    def remove_listener(self, cls, listener):
+        return self.移除监听器(cls, listener)
 
     def 移除监听器(我, 事件, 监听器):
         if 事件 in 我.所有监听器 and 监听器 in 我.所有监听器[事件]:
