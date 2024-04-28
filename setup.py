@@ -4,7 +4,7 @@ discription = "a package of utils"
 
 setuptools.setup(
   name="zlutils",
-  version='0.2.1',
+  version='0.2.2',
   python_requires=">=3.6",
   author="zlols",
   author_email="zlols@foxmail.com",
