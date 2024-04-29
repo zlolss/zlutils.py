@@ -66,6 +66,8 @@ class _事件线程类(threading.Thread):
             #    continue
             事件, 参数 = 我.事件队列.get() # 队列的get方法在队列为空时默认阻塞
             我.处理事件(事件, 参数)
+            if 我.事件队列.qsize()>5:
+                print(f'并发的事件数量{我.事件队列.qsize()}过多, 超过了处理效率.')
 
 
 
