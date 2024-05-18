@@ -28,9 +28,9 @@ class _事件线程类(threading.Thread):
 
     def 处理事件(我, 事件, 参数):
         所有该事件的监听器 = 我.所有监听器.get(事件)
-        待移除 = []
-        if 所有该事件的监听器 is None:
+        if 所有该事件的监听器 is None or len(所有该事件的监听器)<=0:
             return
+        待移除 = []
         for 监听器 in 所有该事件的监听器:
             监听器(参数)
             if 所有该事件的监听器[监听器] == '一次性':
@@ -52,7 +52,7 @@ class _事件线程类(threading.Thread):
             我.所有监听器[事件] = {监听器:None}
 
     def 设置唯一监听器(我, 事件, 监听器):
-        我.所有监听器[事件] = [监听器]
+        我.所有监听器[事件] = {监听器:None}
 
 
     def 移除监听器(我, 事件, 监听器):
@@ -66,7 +66,7 @@ class _事件线程类(threading.Thread):
             #    continue
             事件, 参数 = 我.事件队列.get() # 队列的get方法在队列为空时默认阻塞
             我.处理事件(事件, 参数)
-            if 我.事件队列.qsize()>5:
+            if (我.事件队列.qsize()+1)%255==0:
                 print(f'并发的事件数量{我.事件队列.qsize()}过多, 超过了处理效率.')
 
 
@@ -85,6 +85,9 @@ class 事件类(metaclass=_模式类):
 
     def 触发事件(我, 事件, 参数=None):
         return 我.__事件线程.触发事件(事件, 参数)
+    
+    def handleEvnet(self, event, params=None):
+        return self.__事件线程.处理事件(event, params)
 
     def add_listener(self, event, callback):
         return self.__事件线程.添加监听器(event, callback)
@@ -97,10 +100,15 @@ class 事件类(metaclass=_模式类):
 
     def 设置唯一监听器(我, 事件, 监听器):
         我.__事件线程.设置唯一监听器(事件, 监听器)
+    
+    def set_listener(我, 事件, 监听器):
+        我.__事件线程.设置唯一监听器(事件, 监听器)
 
-    def remove_listener(self, cls, listener):
-        return self.__事件线程.移除监听器(cls, listener)
+    def remove_listener(self, event, listener):
+        return self.__事件线程.移除监听器(event, listener)
 
     def 移除监听器(我, 事件, 监听器):
         return 我.__事件线程.移除监听器(事件, 监听器)
 
+
+EventHandler = 事件类
