@@ -1,6 +1,7 @@
 from .const import _模式类
 # todo: 建立独立线程处理触发的事件
 import threading, queue
+from typing import Callable
 
 
 class _事件线程类(threading.Thread):
@@ -32,7 +33,8 @@ class _事件线程类(threading.Thread):
             return
         待移除 = []
         for 监听器 in 所有该事件的监听器:
-            监听器(参数)
+            if isinstance(监听器, Callable):
+                监听器(参数)
             if 所有该事件的监听器[监听器] == '一次性':
                 待移除.append(监听器)
         for 监听器 in 待移除:
@@ -43,7 +45,7 @@ class _事件线程类(threading.Thread):
         if 事件 in 我.所有监听器:
             我.所有监听器[事件][监听器] = '一次性'
         else:
-            我.所有监听器[事件] = {监听器:'一次性'}
+            我.所有监听器[事件] = {监听器: '一次性'}
 
     def 添加监听器(我, 事件, 监听器):
         if 事件 in 我.所有监听器:
