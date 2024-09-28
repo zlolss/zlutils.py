@@ -1,4 +1,17 @@
 
+def getDeepDict(dd: dict, str_path: str = "", default=None):
+    # 从嵌套的字典中直接取值，避免报错
+    # str_path sample: "llm_api.ollama.url"
+    paths = str_path.split('.')
+    cur = dd
+    for path in paths:
+        cur = cur.get(path, None)
+        if cur is None:
+            cur = default
+            break
+    return cur
+
+
 class 字段类:
     def __init__(我, /, **预设的字段):
         for 字段名, 值 in 预设的字段.items():
