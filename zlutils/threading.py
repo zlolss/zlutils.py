@@ -3,6 +3,88 @@ import threading
 import logging
 import traceback
 import time
+from collections import OrderedDict
+from queue import Queue
+import typing
+
+
+class Player:
+    '''按fps执行_Player_Step
+    包含play, pause, stop功能'''
+
+    def __init__(self, fps=30):
+        self._player_play = False
+        self._player_fps = fps
+        self._player_thread = None
+        pass
+
+    def stop(self):
+        self._Player_Pause()
+
+    def _Player_Play(self):
+        if self._player_is_playing:
+            print('[warn] old player_thread.is_alive() ')
+            self._player_play = True
+            return
+        self._player_play = True
+        self._player_thread = threading.Thread(target=self._Player_Run)
+        self._player_thread.start()
+        pass
+
+    def _Player_Pause(self):
+        self._player_play = False
+        pass
+
+    def _Player_Reset(self):
+        # TODO
+        pass
+
+    @property
+    def _player_is_playing(self):
+        return self._player_thread is not None and self._player_thread.is_alive()
+
+    def _Player_Run(self):
+        base_time = None
+        step_count = 0
+        while self._player_play:
+            if base_time is None or step_count > 0xffff:
+                base_time = time.time()
+                step_count = 0
+
+            self._Player_Step()
+            step_count += 1
+            wait_time = (step_count+1) / self._player_fps - (time.time() - base_time)
+            if wait_time > 0:
+                time.sleep(wait_time)
+            else:
+                base_time = time.time()
+                step_count = 0
+
+    def _Player_Step(self):
+        # 重载
+        pass
+
+    class _Source_Event:
+        # 用于管理帧更新
+        def __init__(self):
+            self._last = None
+            self._flag = False
+
+        def setdata(self, data):
+            if id(data) != id(self._last):
+                self._last = data
+                self._flag = True
+
+        def done(self):
+            self._flag = False
+
+        @property
+        def data(self):
+            return self._last
+
+        @property
+        def undo(self):
+            return self._flag
 
 
 class Restartable:
@@ -76,6 +158,30 @@ class Restartable:
 
     def kill(self):
         return self.stop()
+
+
+class OverloadSkip:
+    # 用于封装方法，调用时如果被占用则跳过，用于实时流处理
+    def __init__(self, target=lambda: print('blank'), max_fps=30):
+        self._target = target
+        self._thread = None
+        self._last_call_time = 0
+        self._max_fps = max_fps
+
+    @property
+    def _call_interval(self):
+        if self._max_fps <= 0:
+            return 0
+        return 1/self._max_fps
+
+    def __call__(self, *args, **kwargs):
+        if self._thread is not None and self._thread.is_alive():
+            return
+        if time.time() - self._last_call_time < self._call_interval:
+            return
+        self._thread = threading.Thread(target=self._target, args=args, kwargs=kwargs)
+        self._last_call_time = time.time()
+        self._thread.start()
 
 
 class Supervised:  # 自重启服务
@@ -181,8 +287,54 @@ class Supervised:  # 自重启服务
         self.__running = True
         self.__thread.start()
 
+    def stop(self):
+        self.stopThread()
+
     def join(self):
         self.__thread.join()
+
+
+class _EventThread(threading.Thread):
+    def __init__(self, parent=None, daemon=True, **kwargs):
+        super().__init__(daemon=daemon, **kwargs)
+        self._parent = parent
+        self._event_queue = Queue()
+        self._event_lock = threading.Condition()
+        self._event_listeners = {}
+
+    def add_listener(self, event, listener):
+        if event in self._event_listeners:
+            self._event_listeners[event][listener] = None
+        else:
+            self._event_listeners[event] = {listener: None}
+
+    def send_event(self, event, *args, **kwargs):
+        self._event_queue.put((event, args, kwargs))
+
+    def remove_listener(self, event, listener):
+        listeners = self._event_listeners.get(event)
+        if listeners is None:
+            return
+        if listener in listeners:
+            del listeners[listener]
+
+    def stop(self):
+        self._event_queue.put(None)
+
+    def run(self):
+        while True:
+            # print('_EventThread start')
+            pac = self._event_queue.get()
+            if pac is None:
+                break
+            event, args, kwargs = pac
+            listeners = self._event_listeners.get(event)
+            # print(listeners)
+            if listeners is None:
+                # print(f'Event {event} has no listener')
+                continue
+            for listener in listeners:
+                listener(*args, **kwargs)
 
 
 class 异步处理单元(Supervised):
@@ -297,6 +449,90 @@ class 异步管理器:
     def 终止(self):
         for 单元名称, 单元 in self.所有异步单元.items():
             单元.终止()
+
+
+class ThreadManager(threading.Thread):
+    # 统一管理线程启停
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._t = OrderedDict()
+        # self.__internal_names = dir(self)
+
+    def _checkThread(self, t):
+        attrs = ['start', 'stop', 'is_alive', 'join']
+        for attr in attrs:
+            if not hasattr(t, attr):
+                return False
+        return True
+
+    def __setattr__(self, name, value):
+        if name.startswith('_') or name in dir(self):
+            return super().__setattr__(name, value)
+        if self._checkThread(value) and name not in self._t:
+            self._t[name] = value
+        else:
+            return super().__setattr__(name, value)
+            # raise RuntimeError(f'{name}:{value} not a thread')
+
+    def __getattribute__(self, name):
+        if name.startswith('_') or name in dir(self):
+            return super().__getattribute__(name)
+        return self._t[name]
+
+    def run(self):
+        # 主线程重写
+        pass
+
+    def is_alive(self):
+        result = False
+        for name, t in self._t.items():
+            result = result or t.is_alive()
+        result = result or super().is_alive()
+        return result
+
+    def start(self):
+        for name, t in self._t.items():
+            if not t.is_alive():
+                print(f'start: {name}')
+                t.start()
+        super().start()
+
+    def stop(self):
+        for name, t in self._t.items():
+            if t.is_alive():
+                print(f'stop: {name}')
+                t.stop()
+        # super().stop()
+
+    def batchRun(self, func_name, *args, **kwargs):
+        # 批量执行
+        for name, t in self._t.items():
+            if hasattr(t, func_name) and isinstance(getattr(t, func_name), typing.Callable):
+                getattr(t, func_name)(*args, **kwargs)
+
+    def join(self):
+        for name, t in self._t.items():
+            t.join()
+        super().join()
+
+
+class EventThread(ThreadManager):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._t['event_thread__'] = _EventThread()
+
+    def add_listener(self, event, listener):
+        return self.event_thread__.add_listener(event, listener)
+
+    def send_event(self, event, *args, **kwargs):
+        # print(f'send {event} {args}')
+        self.event_thread__.send_event(event, *args, **kwargs)
+
+    def remove_listener(self, event, listener):
+        self.event_thread__.remove_listener(event, listener)
+
+    def run(self):
+        self.event_thread__.join()
 
 
 if __name__ == "__main__":

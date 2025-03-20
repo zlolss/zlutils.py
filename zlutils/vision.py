@@ -8,6 +8,27 @@ import pickle
 from .path import ensurePath, decimal_to_x64
 import time
 from io import BytesIO
+from .threading import EventThread
+from .threading import threading
+
+
+def numpy_representer(dumper, data):
+    if isinstance(data, np.integer):
+        return dumper.represent_int(data)
+    elif isinstance(data, np.floating):
+        return dumper.represent_float(float(data))
+    elif isinstance(data, np.bool_):
+        return dumper.represent_bool(bool(data))
+    else:
+        raise TypeError(f"Unrecognized numpy type: {type(data)}")
+
+
+# 将通用representers添加到yaml的Dumper中
+yaml.add_representer(np.integer, numpy_representer)
+yaml.add_representer(np.int64, lambda dumper, data: dumper.represent_int(data))
+yaml.add_representer(np.floating, numpy_representer)
+yaml.add_representer(np.bool_, numpy_representer)
+yaml.add_representer(tuple, lambda dumper, data: dumper.represent_list(data))
 
 
 def imageFormat(image, to_type='image', color='RGB'):
@@ -63,7 +84,6 @@ class Frame:
     # dump()
     # Frame(src, **kwargs) # src可以是图片路径 或 Frame对象 或 PIL.Image.Image对象
     # TODO 附件中包含另一个frame的处理？避免出现循环
-
     DEFAULT_DUMP_TYPES = {
         'png': ['motion', 'mask'],
         'jpg': ['rgb'],
@@ -72,21 +92,36 @@ class Frame:
         'pkl': ['callback'],
         }
     DEFAULT_EXT_TYPES = list(DEFAULT_DUMP_TYPES.keys())
+    PROPERTIES = ['imat', 'regmat', 'image', 'width', 'height', 'wh', 'hw', 'regsize']
 
     def __init__(self, src, **kwargs):
         # 通过帧的图片路径或者一个新的画面创建帧，附加信息通过kwargs传递
         # var definition
         self._auto_id = decimal_to_x64(hash(str(time.time())))
         self.auto_name = f'Frame_{self._auto_id}'
+        self.__src = src
         self._image_raw = None
+        self._imat_raw = None
+        self._regmat_raw = None  # 用于图像处理的统一尺度
         # self._thumbnail = None  # TODO 部分处理过程默认缩小图像到指定大小以加速
         self._image_path = None
         self._meta = {}
         self._cache = {}
+        self._tmp = {}
         self.__invalid_names = dir(self)
+        self._modified = False
+        self.regsize = 224
         # create
         if isinstance(src, Image.Image):
             self._image_raw = src
+        elif isinstance(src, np.ndarray):  # cv2 rgb mat
+            self._imat_raw = src
+            '''
+            image = Image.fromarray(
+                cv2.cvtColor(src, cv2.COLOR_BGR2RGB),
+                mode='RGB' if len(src.shape) == 3 else 'L')
+            self._image_raw = image
+            '''
         elif isinstance(src, str) and os.path.exists(src):
             self._image_path = src.strip()
             meta = self.loadExt('__meta', 'yaml')
@@ -97,14 +132,67 @@ class Frame:
             self._image_raw = src._image_raw
             self._meta = src._meta.copy()
             self._cache = src._cache.copy()
+        else:
+            raise TypeError(f'[error] Frame src not available {src}')
         for name, data in kwargs.items():
             self.setExt(name, data)
+        self.setExt('frame_create_time', time.time())
 
     @property
     def image(self):
-        if self._image_raw is None:
-            self._image_raw = self.loadImage()
+        if self.__src is None:
+            return None
+        elif self._image_raw is None:
+            if self._imat_raw is None:
+                self._image_raw = self.loadImage()
+            else:
+                self._image_raw = Image.fromarray(
+                    # cv2.cvtColor(self._imat_raw, cv2.COLOR_BGR2RGB),
+                    self._imat_raw,
+                    mode='RGB' if len(self._imat_raw.shape) == 3 else 'L')
         return self._image_raw
+
+    @property
+    def width(self):
+        return self.wh[0]
+
+    @property
+    def height(self):
+        return self.wh[1]
+
+
+    @property
+    def imat(self):
+        if self.__src is None:
+            return None
+        elif self._imat_raw is None:
+            self._imat_raw = np.array(self.image)
+        return self._imat_raw
+
+    @property
+    def regmat(self):  # 用于图像处理的统一尺度
+        if self.__src is None:
+            return None
+        elif self._regmat_raw is None:
+            self._regmat_raw = cv2.resize(self.imat, (self.regsize, self.regsize), interpolation=cv2.INTER_LINEAR)
+        return self._regmat_raw
+
+
+
+    @property
+    def wh(self):
+        if self.__src is None:
+            return 0, 0
+        elif isinstance(self._image_raw, Image.Image):
+            return (self._image_raw.width, self._image_raw.height)
+        elif isinstance(self._imat_raw, np.ndarray):
+            return (self._imat_raw.shape[1], self._imat_raw.shape[0])
+        else:
+            return self.image.width, self.image.height
+
+    @property
+    def hw(self):
+        return (self.wh[1], self.wh[0])
 
     @property
     def path(self):
@@ -119,9 +207,12 @@ class Frame:
     def __getattribute__(self, key):
         if key.startswith('_') or key not in self._meta:
             return super().__getattribute__(key)
+        print(f'[warning] please use getitem method [{key}]')
         return self.__getitem__(key)
 
     def __getitem__(self, key):
+        if key in self.PROPERTIES:
+            return getattr(self, key)
         if key not in self._meta:
             return None
         if key in self._cache:
@@ -134,12 +225,21 @@ class Frame:
         return self._meta[key]
 
     def __setitem__(self, key, value):
+        self._modified = True
         self.setExt(key, value)
+
+    def __iter__(self):
+        return (self.PROPERTIES+list(self._meta.keys())).__iter__()
 
     @property
     def __ext_path(self):  # 帧的附加信息文件路径
         if self._image_path is not None:
             return self._image_path.strip()+'.ext.tar'
+
+    def get(self, name, default):
+        if name in self._meta:
+            return self[name]
+        return default
 
     def loadImage(self):
         if os.path.exists(self._image_path):
@@ -160,6 +260,8 @@ class Frame:
             elif type(data).__name__ in ['int', 'float', 'str']:
                 pass
             elif type(data).__name__ in ['list', 'dict']:
+                if len(data) >0 and type(data[0]) not in ['int', 'float', 'str']:
+                    ext_name = 'pkl'
                 pass
             elif isinstance(data, Frame):  # Frame 对象只保存路径 TODO 未保存的Frame对象？
                 ext_name = data._image_path
@@ -167,11 +269,11 @@ class Frame:
                 print(f'{name} is unsupport type {type(data)}: {data}, save as .pkl')
                 ext_name = 'pkl'
 
-            if ext_name is not None:
-                self._cache[name] = data
-                self._meta[name] = ext_name
-            else:
-                self._meta[name] = data
+        if ext_name is not None:
+            self._cache[name] = data
+            self._meta[name] = ext_name
+        else:
+            self._meta[name] = data
 
     def loadExt(self, name, ext_name):
         if not os.path.exists(self.__ext_path):
@@ -183,7 +285,7 @@ class Frame:
                 # ext_name = name.split('.')[-1]
                 with tar.extractfile(tarinfo) as fp:
                     if ext_name == 'yaml':
-                        return yaml.safe_load(fp)
+                        return yaml.load(fp, Loader=yaml.FullLoader)
                     elif ext_name in ['png', 'jpg']:
                         return Image.open(fp)
                     elif ext_name == 'pkl':
@@ -207,7 +309,7 @@ class Frame:
         with tarfile.open(self.__ext_path, open_type) as tar:
             tarinfo = tarfile.TarInfo(name=f'{name}.{ext_name}')
             if ext_name == 'yaml':
-                fp = BytesIO(yaml.safe_dump(data).encode('utf-8'))
+                fp = BytesIO(yaml.dump(data).encode('utf-8'))
                 tarinfo.size = len(fp.getbuffer())
                 tar.addfile(tarinfo, fp)
             elif ext_name == 'jpg':
@@ -282,16 +384,69 @@ class Frame:
         return Frame(self)
 
 
-class FrameShader:
+class FrameShader(EventThread):
     # 生成新的特征并添加到frame中
+    # 跳过溢出的帧
     # usage：
     # fs = FrameShader()
     # frame = fs(frame)
-    def forward(self, frame):
+    EVENT_FRAME = 1
+    _last_frame = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._runing_event = threading.Event()
+        self._runing_event.clear()
+
+    @property
+    def last_frame(self):
+        return self._last_frame
+
+    def forward(self, frame: Frame):
+        # 重写
         return Frame(frame)
 
-    def __call__(self, frame):
-        return self.forward(frame)
+    def __call__(self, frame):  # TODO 处理过程不应该占用主线程， 用队列
+        if self._runing_event.is_set():
+            return
+        if frame is None:
+            return
+        self._runing_event.set()
+        if not isinstance(frame, Frame):
+            frame = Frame(frame)
+        frame = self.forward(frame)
+        if self._last_frame != frame:
+            self._last_frame = frame
+            self.send_event(self.EVENT_FRAME, self._last_frame)
+        self._runing_event.clear()
+        return self._last_frame
+
+
+class FrameSkipShader(FrameShader):
+    # 变化过低的帧
+    _reduced_imat = None
+    _reduce_times = 2
+    _skip_threashold = 0.1
+    _last_diff_rate = 1
+    _diff_rate_count = 0
+
+    def forward(self, frame: Frame):
+        reduced_imat = np.array(frame.image.reduce(self._reduce_times))
+        if self._reduced_imat is None:
+            self._reduced_imat = reduced_imat
+            self._diff_rate_count = 0
+            return frame
+        elif reduced_imat.shape != self._reduced_imat.shape:
+            self._reduced_imat = reduced_imat
+            self._diff_rate_count = 0
+            return frame
+        self._last_diff_rate = imatDiffRate(self._reduced_imat, reduced_imat)
+        self._diff_rate_count += self._last_diff_rate
+        if self._diff_rate_count < self._skip_threashold:
+            return self._last_frame
+        self._reduced_imat = reduced_imat
+        self._diff_rate_count = 0
+        return frame
 
 
 class MotionShader(FrameShader):
@@ -301,12 +456,14 @@ class MotionShader(FrameShader):
         self,
         decline_per_second=300,  # 每秒衰减的总灰度值
         reduced=2,  # 处理前将图片缩小倍率，精度换速度
-        ):
-        self.last_frame = None
+        diff_threshold = 50
+    ):
+        super().__init__()
+        self._last_frame = None
         self.decline_per_second = decline_per_second
         self.reduced = int(reduced)
         self.decline_count = 0
-        self.diff_threshold = 20
+        self.diff_threshold = diff_threshold
         self.t0 = time.time()
         self.reset()
         # self.start()
@@ -328,7 +485,7 @@ class MotionShader(FrameShader):
             frame = np.array(_frame.image.reduce(self.reduced))
         else:
             frame = np.array(_frame.image)
-        frame_time = _frame.timestamp
+        frame_time = _frame.get('timestamp', time.time())
         if self.last_player_frame is None or self.last_player_frame.shape != frame.shape:
             diff_frame = frame
             self.remain_frame = None
@@ -350,8 +507,18 @@ class MotionShader(FrameShader):
                 (motion_image.width*self.reduced, motion_image.height*self.reduced),
                 Image.NEAREST
                 )
-        return Frame(
-            _frame,
-            motion_image=motion_image,
-            )
+        _frame['motion_image'] = motion_image  # 修改原frame植入信息
+        _frame['motion_imat']  = self.remain_frame
+        return _frame
+        #return Frame(
+        #    _frame,
+        #    motion_image=motion_image,
+        #    )
 
+
+def makeFrame(src, **kwargs):
+    if src is None:
+        return None
+    elif isinstance(src, Frame):
+        return src
+    return Frame(src, **kwargs)
