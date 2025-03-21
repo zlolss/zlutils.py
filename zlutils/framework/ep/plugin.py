@@ -3,12 +3,22 @@
 event_type中的路径用`.`隔开
 故event_type的实际名称中不能包含`.`
 
+PluginManager实例化时自动载入Plugins目录下的插件
+
+插件中必须包含CREATORS列表列出需要创建的插件类
+例如:
+CREATORS = [Plugin]
+
 '''
 
 # if __name__ == "__main__":
 #    from event_manager import EventManager
 # else:
 #    from .event_manager import EventManager
+
+
+import importlib
+import pkgutil
 
 
 class Plugin:
@@ -42,11 +52,14 @@ class Plugin:
         self._plugins[new_plugin._plugin_tag] = new_plugin
         return new_plugin._plugin_tag
 
-    def loadPluginByPath(self, plugin_path):
-        plugin_module = __import__(plugin_path, fromlist=[None])
-        creators = getattr(plugin_module, 'CREATORS')
-        for creator in creators:
-            self.addPlugin(creator)
+    def _loadPlugins(self, plugin_dir):
+        package = importlib.import_module(plugin_dir)
+        for _, name, _ in pkgutil.iter_modules(package.__path__):
+            module = importlib.import_module(f"{plugin_dir}.{name}")
+            # print(module, getattr(module, 'CREATORS'))
+            creators = getattr(module, 'CREATORS')
+            for creator in creators:
+                self.addPlugin(creator)
         # plugin_class = getattr(plugin_module, 'Plugin')
         #plugin_instance = plugin_class(self.event_manager)
         #self.lifecycle_manager.register_plugin(plugin_path, plugin_instance)
@@ -99,8 +112,11 @@ class Plugin:
 
 class PluginManager(Plugin):
 
-    def __init__(self):
+    def __init__(self, plugin_dir='Plugins'):
         super().__init__(plugin_manager=None)
+        self.plugin_dir = plugin_dir
+        self._loadPlugins(plugin_dir=plugin_dir)
+
 
 # 通过CREATORS创建插件
 CREATORS = [Plugin]
