@@ -32,6 +32,10 @@ class App:
             ]
         pass
 
+    @property
+    def pm(self):  # 别名 plugin_manager
+        return self.plugin_manager
+
     def run(self):
         for state in self.lifecycle_states:
             getattr(self, f'on_{state}')()

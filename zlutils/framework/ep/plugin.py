@@ -19,11 +19,18 @@ CREATORS = [Plugin]
 
 import importlib
 import pkgutil
+if __name__ == "__main__":
+    from config import ConfigManager
+else:
+    from .config import ConfigManager
 
 
 class Plugin:
     # 插件模板
     # --- 插件重载方法 ---
+    def initVar(self):
+        pass
+
     def initEvent(self):
         # 初始化过程中用self.subscribeEvent(event_type, callback, priority=-1)注册事件
         pass
@@ -31,23 +38,29 @@ class Plugin:
     # --- 初始化 ---
     def __init__(self, plugin_manager=None):
         self.__pm = plugin_manager  # 插件管理器, 不可更改
+        self.conf = ConfigManager(section=self._plugin_tag)
         if self.__pm is None:
-            if __name__ == "__main__":
+            if __name__ == "__main__":  # debug
                 from event import EventManager
             else:
                 from .event import EventManager
             self._event_manager = EventManager()
         else:
             self._event_manager = None
+            self.conf._init_config_parser = self.__pm.conf._init_config_parser
         self._plugins = {}
         # 预处理
+        self.initVar()
         self.initEvent()
+        # self.publishEvent('initialized')
 
     # TODO --- 插件管理 ---
 
     def addPlugin(self, plugin_creator):
         new_plugin = plugin_creator(plugin_manager=self)
-        assert isinstance(new_plugin, Plugin)
+        # print(plugin_creator.__bases__)
+        if __name__ != "__main__":  # debug
+            assert isinstance(new_plugin, Plugin)
         assert new_plugin._plugin_tag not in self._plugins
         self._plugins[new_plugin._plugin_tag] = new_plugin
         return new_plugin._plugin_tag
@@ -92,13 +105,14 @@ class Plugin:
             event_type = '.' + event_type
         return event_type.lower()
 
-    def publishEvent(self, event_type, event_data=None):
+    def publishEvent(self, event_type, event_data=None, source=None):
         event_type = self.wrapEventType(event_type)
+        source = self if source is None else source
         # print(event_type)
         if self.__pm is not None:
-            self.__pm.publishEvent(event_type, event_data)
+            self.__pm.publishEvent(event_type, event_data, source=source)
         else:
-            self._event_manager.publish(event_type, event_data)
+            self._event_manager.publish(event_type, event_data, source=source)
 
     def subscribeEvent(self, event_type, callback, priority=None):
         if priority is None and '.' not in event_type:
@@ -112,8 +126,11 @@ class Plugin:
 
 class PluginManager(Plugin):
 
-    def __init__(self, plugin_dir='Plugins'):
+    def __init__(self, plugin_dir='Plugins', config_path='config.ini'):
         super().__init__(plugin_manager=None)
+        self.config_path = config_path
+        self.conf._section = 'main'
+        self.conf.loadINI(config_path)
         self.plugin_dir = plugin_dir
         self._loadPlugins(plugin_dir=plugin_dir)
 
@@ -143,4 +160,14 @@ if __name__ == "__main__":
     pm.publishEvent('pmprint2')
     pb.publishEvent('pmprint')
     print(pm._event_manager.listeners)
-
+    print(pm.conf._init_config_parser)
+    print(pm.conf._init_config_parser.get('main', 'test'))
+    print(type(pm.conf._init_config_parser.get('main', 'test')))
+    # print(pm.conf._init_config_parser.get('main1', 'test'))
+    print(pm.conf._init_config_parser.get('main', 'test1', fallback='mone'))
+    print(pm.conf.test)
+    pm.conf._default_config['test'] = 2
+    print(pm.conf.test)
+    pm.conf._manual_config['test1'] = 3
+    print(pm.conf.test1)
+    print(pm.conf.test3)

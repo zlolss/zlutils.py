@@ -39,9 +39,10 @@ import bisect
 
 
 class Event:
-    def __init__(self, event_type, data=None):
+    def __init__(self, event_type, data=None, source=None):
         self.type = event_type
         self.data = data
+        self.source = source  # 事件来源
 
     def __repr__(self):
         return f'<Event "{self.type}", data={self.data}>'
@@ -65,14 +66,15 @@ class EventManager:
         elif priority == 0:
             self.listeners[event_type].insert(0, (callback, priority))
         elif priority == -1:
-            priority = max(self.listeners[event_type], key=lambda x:x[1])
+            # print('\n', self.listeners)
+            priority = max(self.listeners[event_type], key=lambda x: x[1])[1]
             self.listeners[event_type].append((callback, priority))
         else:
             i = bisect.bisect_right(self.listeners[event_type], priority, key=lambda x: x[1])
             self.listeners[event_type].insert(i, (callback, priority))
 
-    def publish(self, event_type, event_data=None):
-        e = Event(event_type, event_data)
+    def publish(self, event_type, event_data=None, source=None):
+        e = Event(event_type, event_data, source)
         if event_type in self.listeners:
             for callback, _ in self.listeners[event_type]:
                 callback(e)
